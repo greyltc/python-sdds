@@ -1,0 +1,11 @@
+SDDS1
+&column name=City, type=string,  &end
+&column name=Temperature, units="deg C", type=double,  &end
+&column name=Humidity, units=%, type=double,  &end
+&data mode=ascii, &end
+! page number 1
+                   4
+Chicago  3.800000000000000e+01  9.500000000000000e+01 
+"New York"  3.200000000000000e+01  7.000000000000000e+01 
+"San Francisco"  3.000000000000000e+01  4.200000000000000e+01 
+"Los Angeles"  4.000000000000000e+01  6.500000000000000e+01 
