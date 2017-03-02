@@ -1,7 +1,8 @@
 SDDS1
-&column name=City, type=string,  &end
+&column name=City, type=string,  &end ! this is a comment
 &column name=Temperature, units="deg C", type=double,  &end
-&column name=Humidity, units=%, type=double,  &end
+! this is a comment
+&column name=Humidity, units='%', type=double,  &end
 &data mode=ascii, &end
 ! page number 1
                    4

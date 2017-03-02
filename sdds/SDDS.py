@@ -2,68 +2,94 @@ from . import eprint
 import gzip
 import f90nml
 import io
-import re
 
 class SDDS:
+  def __del__(self):
+    # close any open files
+    try:
+      close (self.fp)
+    except:
+      pass
+    try:
+      close (self.gzfp)
+    except:
+      pass
+
   def __init__(self, fileName=None):
+    self.fileName = fileName
     self.description = ["", ""]
-    self.version = None # SDDS format version
     self.gzipped = None # is the underlying file gzipped?
     self.nPages = None # number of data pages
+    self.tableCols = None # aspects of the columns in the table (None if no table)
     if fileName is not None:
-      fp = open(fileName,'rb') # open the file for reading in binary mode
-      first5 = fp.read(5) # let's inspect the first 5 bytes
-      fp.seek(0) # reset pointer
-      if first5[0:4] != b'SDDS':
-        gzfp = gzip.GzipFile(fileobj=fp) # maybe it's gzipped
-        first5 = gzfp.read(5) # is this really a .sdds file?
-        gzfp.seek(0)
-        if first5[0:4] != b'SDDS':
-          gzfp.close()
-          fp.close()
+      self.fp = open(self.fileName,'rb') # open the file for reading
+      try:
+        first4 = self.fp.read(4).decode('utf-8') # let's inspect just the first 4 bytes
+      except:
+        first4 = ''
+      self.fp.seek(0) # reset pointer
+      if first4 != 'SDDS':
+        #self.gzfp = copy.copy(self.fp) # make a copy of the file pointer for gzip mode reading
+        self.gzfp = gzip.GzipFile(fileobj=self.fp) # try reading the file as gzip data
+        try:
+          first4 = self.gzfp.read(4).decode('utf-8') # now does it look like SDDS?
+        except:
+          first4 = ''
+        self.gzfp.seek(0)
+        if first4 != 'SDDS':
           eprint('This file does not start with "SDDS"')
           return
         else:
+          self.wfp = self.gzfp # set working file pointer
           self.gzipped = True
       else:
+        self.wfp = self.fp # set working file pointer
         self.gzipped = False
       
-      self.version = int(chr(first5[4]))
+      versionLine = self.wfp.readline().rstrip()
+      self.version = int(versionLine[4:])
+      
       if self.version != 1: # do we have version 1?
-        if self.gzipped:
-          gzfp.close()
-        fp.close()
-        eprint('Unsupported SDDS format version:', self.version)
+        eprint('Unsupported SDDS format version:', versionLine)
         return
       
-      # probably dumb to store the whole file in RAM...
-      if self.gzipped:
-        f = gzfp.read()
-        gzfp.close()
-      else:
-        f = fp.read()
-      fp.close()
+      # switch to text mode with utf-8 encoding
+      position = self.wfp.tell()
+      try: 
+        rawStream = self.wfp.detach() #this fails when we're reading a gzip'd file
+        self.wfp = io.TextIOWrapper(rawStream,'utf-8')
+      except:
+        self.fp.seek(0)
+        self.wfp = gzip.open(self.fp, mode='rt', encoding='utf-8')
       
-      partitioned = f.partition(b'\n!') # split out the header
-      header = partitioned[0] 
-      headerLines = header.splitlines() # split the header into lines
-      del headerLines[0] # we already checked that this is 'SDDS1'
+      self.wfp.seek(position)
       
-      # parse each header line using f90nml
-      nmlStream =  io.StringIO() # we'll write our header lines to this file-like object so that f90nml can read them
-      for hLine in headerLines:
-        string = hLine.decode("utf-8").replace('=%',"='%'") # hack to fix a bug in f90nml, see https://github.com/marshallward/f90nml/issues/42
-        nmlStream.write(string)
-        nmlStream.truncate() # delete any previous longer line leftover
-        nmlStream.seek(0) # go back to the start of the file to get ready to read
-        nameList = f90nml.read(nmlStream) # parse the header line with f90nml
-        nmlStream.seek(0) # get ready to write the next header line
-        print('Header Row: ' + str(nameList))
+      # parse the header line with f90nml
+      parser = f90nml.Parser()
+      headerNml = parser.read(self.wfp)
+      #headerNml = f90nml.read(self.wfp)
       
-      dataPages = b'!' + partitioned[2] # reattach the !
-      dataPages = re.split(b'! page number [0-9]*\n', dataPages) # split up each page
-      del dataPages[0] # remove the empty index from re.split
-      self.nPages = len(dataPages)
+      for commandSet in headerNml.items():
+        command = commandSet[0]
+        parameters = commandSet[1]
+        if command == 'column':
+          self.tableCols = []
+          for column in parameters:
+            tableCol = {}
+            for (attribute,value) in column.items():
+              tableCol[attribute] = value
+            self.tableCols.append(tableCol)
+        elif command == 'include':
+          eprint('Error: include command not yet supported!')
+          return
+        elif command == 'data':
+          for (attribute,value) in parameters.items():
+            print(attribute, '=', value)
+            if attribute.lower == 'mode' and value.lower != 'ascii':
+              eprint('Error:', value.lower, 'mode data not yet supported!')
+              return
+        else:
+          eprint('Unrecognized command in header: ' + command)
       
-      for page in dataPages:
-        print('Data Page: ' + str(page))
+      #TODO figure out how to get back to the end of the header
+      print(self.wfp.read())
