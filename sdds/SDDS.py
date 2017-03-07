@@ -16,6 +16,7 @@ class SDDS:
       pass
 
   def __init__(self, fileName=None):
+    self.mode = 'binary'
     self.fileName = fileName
     self.description = ["", ""]
     self.gzipped = None # is the underlying file gzipped?
@@ -64,10 +65,71 @@ class SDDS:
       
       self.wfp.seek(position)
       
+      class MyParser(f90nml.Parser):
+        def __init__(self):
+          self.inNml = False
+          self.endThis = False
+          self.inParameterCmd = False
+          self.needDataCmd = False
+          self.inDataCmd = False
+          self.fixedValueParam = False
+          self.lastHeaderLine = 0
+          super(MyParser, self).__init__()
+        def __setattr__(self, k, v): 
+          super(MyParser, self).__setattr__(k, v)
+          if k == 'prior_token':
+            #print(self.prior_token)
+            #print(self.token)
+            #print('')
+            if not self.inNml and self.prior_token in ('&', '$') and self.token.lower() in ('description', 'column', 'parameter', 'array', 'include', 'data'): # we saw a start indicator
+                self.inNml = True
+                if self.token.lower() in ('array', 'column'):
+                  self.needDataCmd = True
+                if self.token.lower() == 'parameter':
+                  self.inParameterCmd = True
+                if self.token.lower() == 'data':
+                  self.inDataCmd = True                
+            elif self.inParameterCmd and self.token.tolower() == 'fixed_value':
+              self.fixedValueParam = True
+            elif self.inNml and self.prior_token in ('&', '$', '/'): # we saw an end terminator
+              self.inNml = False
+              if self.inParameterCmd:
+                self.inParameterCmd = False
+                if self.fixedValueParam == False:
+                  self.needDataCmd = True
+                else:
+                  self.fixedValueParam = False
+                  
+            # we're done if we saw an end terminator while in a data command
+            if (self.inDataCmd == True) and self.token in ('&', '$', '/'): 
+              self.lastHeaderLine = self.tokens.lineno
+              self.endThis = True
+            
+            if not self.inNml and self.token in ('end', None):
+              pass
+            elif not self.inNml and self.token not in ('&', '$') and not self.needDataCmd:
+              # TODO: double check this termination case 
+              self.lastHeaderLine = self.tokens.lineno
+              self.endThis = True
+            
+            
+        def update_tokens(self, *args, **kwargs):
+          if self.endThis == False:
+            super(MyParser, self).update_tokens(*args, **kwargs)
+          else:
+            raise StopIteration
+            
+      
       # parse the header line with f90nml
-      parser = f90nml.Parser()
+      #parser = f90nml.Parser()
+      parser = MyParser()
+      #headerNml = parser.read(self.wfp)
+      storage = io.StringIO()
+      patch_nml = {'data': {'somemagic': "deadbeef"}}
       headerNml = parser.read(self.wfp)
       #headerNml = f90nml.read(self.wfp)
+      
+      self.nHeaderLines = parser.lastHeaderLine + 1
       
       for commandSet in headerNml.items():
         command = commandSet[0]
@@ -84,12 +146,17 @@ class SDDS:
           return
         elif command == 'data':
           for (attribute,value) in parameters.items():
-            print(attribute, '=', value)
             if attribute.lower == 'mode' and value.lower != 'ascii':
               eprint('Error:', value.lower, 'mode data not yet supported!')
               return
+            else:
+              self.mode = 'ascii'
+              
         else:
           eprint('Unrecognized command in header: ' + command)
       
-      #TODO figure out how to get back to the end of the header
-      print(self.wfp.read())
+      self.wfp.seek(0)
+      self.header = ''
+      for i in range(self.nHeaderLines):
+        self.header = self.header + self.wfp.readline()
+      self.dataPages = self.wfp.read()
