@@ -16,9 +16,10 @@ class SDDS:
       pass
 
   def __init__(self, fileName=None):
-    self.mode = 'binary'
     self.fileName = fileName
-    self.description = ["", ""]
+    self.description = {}
+    self.data = {}
+    self.data['mode'] = 'binary'
     self.gzipped = None # is the underlying file gzipped?
     self.nPages = None # number of data pages
     self.tableCols = None # aspects of the columns in the table (None if no table)
@@ -69,11 +70,7 @@ class SDDS:
         def __init__(self):
           self.inNml = False
           self.endThis = False
-          self.inParameterCmd = False
-          self.needDataCmd = False
-          self.inDataCmd = False
-          self.fixedValueParam = False
-          self.lastHeaderLine = 0
+          self.thisLine = 0
           super(MyParser, self).__init__()
         def __setattr__(self, k, v): 
           super(MyParser, self).__setattr__(k, v)
@@ -81,38 +78,18 @@ class SDDS:
             #print(self.prior_token)
             #print(self.token)
             #print('')
-            if not self.inNml and self.prior_token in ('&', '$') and self.token.lower() in ('description', 'column', 'parameter', 'array', 'include', 'data'): # we saw a start indicator
+            if not self.inNml:
+              if self.token in ('&', '$'): # we saw a start indicator
                 self.inNml = True
-                if self.token.lower() in ('array', 'column'):
-                  self.needDataCmd = True
-                if self.token.lower() == 'parameter':
-                  self.inParameterCmd = True
-                if self.token.lower() == 'data':
-                  self.inDataCmd = True                
-            elif self.inParameterCmd and self.token.tolower() == 'fixed_value':
-              self.fixedValueParam = True
-            elif self.inNml and self.prior_token in ('&', '$', '/'): # we saw an end terminator
-              self.inNml = False
-              if self.inParameterCmd:
-                self.inParameterCmd = False
-                if self.fixedValueParam == False:
-                  self.needDataCmd = True
-                else:
-                  self.fixedValueParam = False
-                  
-            # we're done if we saw an end terminator while in a data command
-            if (self.inDataCmd == True) and self.token in ('&', '$', '/'): 
-              self.lastHeaderLine = self.tokens.lineno
-              self.endThis = True
-            
-            if not self.inNml and self.token in ('end', None):
-              pass
-            elif not self.inNml and self.token not in ('&', '$') and not self.needDataCmd:
-              # TODO: double check this termination case 
-              self.lastHeaderLine = self.tokens.lineno
-              self.endThis = True
-            
-            
+              elif self.token in ('end', None):
+                pass
+              if self.prior_token not in ('end', None, '&', '$'):
+                self.endThis = True
+            else: # inNml
+              if self.token in ('&','$'):
+                self.inNml = False
+                self.thisLine = self.tokens.lineno
+
         def update_tokens(self, *args, **kwargs):
           if self.endThis == False:
             super(MyParser, self).update_tokens(*args, **kwargs)
@@ -125,33 +102,44 @@ class SDDS:
       parser = MyParser()
       #headerNml = parser.read(self.wfp)
       storage = io.StringIO()
-      patch_nml = {'data': {'somemagic': "deadbeef"}}
       headerNml = parser.read(self.wfp)
       #headerNml = f90nml.read(self.wfp)
       
-      self.nHeaderLines = parser.lastHeaderLine + 1
+      self.nHeaderLines = parser.thisLine + 1
       
-      for commandSet in headerNml.items():
+      for commandSet in headerNml.items(): # loop through the command types
         command = commandSet[0]
-        parameters = commandSet[1]
-        if command == 'column':
+        instances = commandSet[1]
+        if command == 'description':
+            for (attribute, value) in instances.items():
+                self.description[attribute] = value
+        elif command == 'column': # TODO: test this when there's only 1 column defined
           self.tableCols = []
-          for column in parameters:
+          for commands in instances:
             tableCol = {}
-            for (attribute,value) in column.items():
+            for (attribute,value) in commands.items():
               tableCol[attribute] = value
             self.tableCols.append(tableCol)
+        elif command == 'parameter':
+          self.parameters = []
+          for commands in instances:
+            parameter = {} 
+            for (attribute, value) in commands.items():
+              parameter[attribute] = value
+            self.parameters.append(parameter)
+        elif command == 'array':
+          self.arrays = []
+          for commands in instances:
+            array = {}
+            for (attribute, value) in commands.items():
+              array[attribute] = value
+            self.arrays.append(array)        
         elif command == 'include':
           eprint('Error: include command not yet supported!')
           return
         elif command == 'data':
-          for (attribute,value) in parameters.items():
-            if attribute.lower == 'mode' and value.lower != 'ascii':
-              eprint('Error:', value.lower, 'mode data not yet supported!')
-              return
-            else:
-              self.mode = 'ascii'
-              
+          for (attribute,value) in instances.items():
+            self.data[attribute] = value
         else:
           eprint('Unrecognized command in header: ' + command)
       
@@ -159,4 +147,4 @@ class SDDS:
       self.header = ''
       for i in range(self.nHeaderLines):
         self.header = self.header + self.wfp.readline()
-      self.dataPages = self.wfp.read()
+      #self.dataPages = self.wfp.read()

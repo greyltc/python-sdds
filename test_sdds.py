@@ -8,3 +8,8 @@ pprint (vars(ds), width=1)
 
 dsgz = ssds('exampleData'+os.path.sep+'cityWeather.sdds.gz')
 pprint (vars(dsgz), width=1)
+
+# broken
+#gs = ssds('exampleData'+os.path.sep+'par.twi')
+#pprint (vars(gs), width=1)
+
