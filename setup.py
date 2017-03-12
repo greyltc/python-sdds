@@ -5,7 +5,7 @@ from setuptools import setup, find_packages
 
 setup(
   name='sdds',
-  version='0.1',
+  version='0.12',
   description='pure python parser for SDDS (self describing data set) files',
   author='Grey Christoforo',
   author_email='grey@christoforo.net',
