@@ -46,14 +46,12 @@ class SDDS:
   # gets a line from the file that's not a comment
   def getLine(self):
     newLine = '!'
-    while len(newLine) !=0 and newLine[0] == '!':
+    while len(newLine) !=0 and newLine[0] in ('!', 33):
       try:
         newLine = self.wfp.readline()
       except:
-        eprint("End of file reached")
         raise Exception
-    if newLine == '':
-      eprint('Got empty line')
+    if newLine in ('',b''): # TODO: need to figure out how to seperate empty line from end of file
       self.__del__()
       raise Exception
     return newLine
@@ -76,7 +74,10 @@ class SDDS:
     self.nArrays = 0 # number of arrays to be read from data page(s)
     self.tableCols = None # aspects of the columns in the table (None if no table)
     if fileName is not None:
-      self.fp = open(self.fileName,'rb') # open the file for reading
+      if type(self.fileName) == str:
+        self.fp = open(self.fileName,'rb') # open the file for reading
+      else:
+        self.fp = self.fileName # let's assume if this isn't a string, we can read from it
       try:
         first4 = self.fp.read(4).decode('utf-8') # let's inspect just the first 4 bytes
       except:
@@ -266,23 +267,20 @@ class SDDS:
               totElements = nElements
             
             # now we'll read in the array
-            if dataPage['arrays'][array['name']]['type'] == 'string':
+            arrayType = dataPage['arrays'][array['name']]['type']
+            if arrayType == 'string':
               elementsRead = 0
               arrayVals = np.array([],dtype=str)
               while elementsRead < totElements:
                 l = self.getLine()
+                #iol = io.BytesIO(l)
                 iol = io.StringIO(l)
                 df = pd.read_csv(iol, delim_whitespace=True,header=None)
                 arrayLine = df.as_matrix()[0].astype(str)
                 arrayVals = np.concatenate((arrayVals,arrayLine))
                 elementsRead = elementsRead + len(arrayLine)
-                
-            elif dataPage['arrays'][array['name']]['type'] == 'character':
-              eprint('Unsupported character array type')
-              return
             else:
               remainingElements = totElements
-              arrayType = dataPage['arrays'][array['name']]['type']
               if arrayType == 'short':
                 converter = np.int16
               elif arrayType == 'long':
@@ -297,16 +295,18 @@ class SDDS:
                 eprint('Unsupported array datatype')
                 return
               
-              arrayVals = np.fromfile(self.wfp,dtype=converter,count=totElements,sep=" ")
-              #arrayVals = np.array([],dtype=converter)
+              if self.gzipped == False:
+                arrayVals = np.fromfile(self.wfp,dtype=converter,count=totElements,sep=" ")
+              else:
+                arrayVals = np.array([],dtype=converter)
               
-              #elementsRead = 0
-              #while elementsRead < totElements:
-              #  data = self.getLine().split()
-              #  arrayVals = arrayVals.append(np.array(data,dtype=converter))
-              #  elementsRead = elementsRead + len(data)
+                elementsRead = 0
+                while elementsRead < totElements:
+                  data = self.getLine().split()
+                  arrayVals = np.concatenate((arrayVals,np.fromiter(data,dtype=converter)))
+                  elementsRead = elementsRead + len(data)
                 
-              # reshape it to be what we expect
+            # reshape it to be what we expect
             arrayVals = arrayVals.reshape(nElements)
             dataPage['arrays'][array['name']]['value'] = arrayVals
               
@@ -317,15 +317,17 @@ class SDDS:
           try:
             if self.data['no_row_counts'] == 0:
               tableRows = int(self.getLine())
-              tableData = ""
-              for i in range(tableRows):
+              tableData = self.getLine()
+              for i in range(tableRows-1):
                 tableData = tableData + self.getLine()
             else:
-              tableLine = self.GetLine()
-              tableData = ""
-              while tableLine != "":
-                tableData = tableData + tableLine
+              tableData = self.GetLine()
+              while True:
                 tableLine = self.GetLine()
+                if tableLine == "":
+                  break
+                else:
+                  tableData = tableData + tableLine
           except:
             return
           dataPage['table'] = tableData

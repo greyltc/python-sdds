@@ -11,4 +11,3 @@ pprint (vars(dsgz), width=1)
 
 gs = ssds('exampleData'+os.path.sep+'par.twi')
 pprint (vars(gs), width=1)
-
